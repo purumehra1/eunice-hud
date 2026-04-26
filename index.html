@@ -1,0 +1,665 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>EUNICE — HUD</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@400;700;900&display=swap');
+
+  :root {
+    --cyan:    #00d4ff;
+    --blue:    #0066ff;
+    --gold:    #ffd700;
+    --red:     #ff3333;
+    --green:   #00ff88;
+    --dim:     #003344;
+    --bg:      #020a10;
+    --panel:   rgba(0,30,50,0.85);
+    --border:  rgba(0,212,255,0.3);
+  }
+
+  * { margin:0; padding:0; box-sizing:border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--cyan);
+    font-family: 'Share Tech Mono', monospace;
+    height: 100vh;
+    overflow: hidden;
+    display: grid;
+    grid-template-columns: 280px 1fr 280px;
+    grid-template-rows: 60px 1fr 120px;
+    gap: 8px;
+    padding: 8px;
+  }
+
+  /* ── HEADER ── */
+  header {
+    grid-column: 1 / -1;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 1px solid var(--border);
+    padding: 0 16px;
+    background: var(--panel);
+    border-radius: 4px;
+  }
+
+  .logo {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 1.4rem;
+    font-weight: 900;
+    letter-spacing: 8px;
+    color: var(--cyan);
+    text-shadow: 0 0 20px var(--cyan);
+  }
+
+  .logo span { color: var(--gold); }
+
+  #clock {
+    font-size: 1.1rem;
+    color: var(--gold);
+    letter-spacing: 3px;
+  }
+
+  #status-dot {
+    width: 10px; height: 10px;
+    border-radius: 50%;
+    background: var(--green);
+    box-shadow: 0 0 10px var(--green);
+    animation: pulse 2s infinite;
+    display: inline-block;
+    margin-right: 8px;
+  }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50%       { opacity: 0.3; }
+  }
+
+  /* ── LEFT PANEL ── */
+  #panel-left {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    overflow: hidden;
+  }
+
+  /* ── CAMERA ── */
+  #camera-wrap {
+    position: relative;
+    background: #000;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  #cam { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+  /* YOLO boxes drawn on canvas overlay */
+  #detection-canvas {
+    position: absolute;
+    top:0; left:0; width:100%; height:100%;
+    pointer-events: none;
+  }
+
+  /* Scan line */
+  #scanline {
+    position: absolute;
+    left: 0; width: 100%;
+    height: 2px;
+    background: linear-gradient(90deg, transparent, var(--cyan), transparent);
+    opacity: 0.6;
+    animation: scan 3s linear infinite;
+  }
+
+  @keyframes scan {
+    0%   { top: 0; }
+    100% { top: 100%; }
+  }
+
+  /* Corner brackets */
+  .corner {
+    position: absolute;
+    width: 20px; height: 20px;
+    border-color: var(--cyan);
+    border-style: solid;
+    opacity: 0.8;
+  }
+  .corner.tl { top:8px; left:8px;  border-width: 2px 0 0 2px; }
+  .corner.tr { top:8px; right:8px; border-width: 2px 2px 0 0; }
+  .corner.bl { bottom:8px; left:8px;  border-width: 0 0 2px 2px; }
+  .corner.br { bottom:8px; right:8px; border-width: 0 2px 2px 0; }
+
+  /* FPS badge */
+  #fps-badge {
+    position: absolute;
+    top: 10px; left: 50%;
+    transform: translateX(-50%);
+    font-size: 0.7rem;
+    background: rgba(0,0,0,0.6);
+    padding: 2px 8px;
+    border: 1px solid var(--border);
+    border-radius: 2px;
+    letter-spacing: 2px;
+  }
+
+  /* ── RIGHT PANEL ── */
+  #panel-right {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    overflow: hidden;
+  }
+
+  /* ── BOTTOM (EUNICE RESPONSE) ── */
+  #panel-bottom {
+    grid-column: 1 / -1;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 12px 20px;
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    overflow: hidden;
+  }
+
+  .eunice-icon {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 0.7rem;
+    color: var(--gold);
+    letter-spacing: 3px;
+    white-space: nowrap;
+    border: 1px solid var(--gold);
+    padding: 4px 8px;
+    border-radius: 2px;
+    opacity: 0.9;
+  }
+
+  #eunice-text {
+    font-size: 0.95rem;
+    color: #e0f8ff;
+    letter-spacing: 1px;
+    flex: 1;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    transition: opacity 0.5s;
+  }
+
+  #eunice-cursor {
+    display: inline-block;
+    width: 8px; height: 1em;
+    background: var(--cyan);
+    vertical-align: text-bottom;
+    animation: blink 1s step-end infinite;
+  }
+
+  @keyframes blink {
+    0%, 100% { opacity: 1; }
+    50%       { opacity: 0; }
+  }
+
+  /* ── WIDGET COMPONENTS ── */
+  .widget-title {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 0.55rem;
+    letter-spacing: 4px;
+    color: rgba(0,212,255,0.5);
+    text-transform: uppercase;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 6px;
+    margin-bottom: 4px;
+  }
+
+  /* Detection list */
+  #detection-list {
+    font-size: 0.75rem;
+    line-height: 1.8;
+    flex: 1;
+    overflow-y: auto;
+  }
+
+  #detection-list::-webkit-scrollbar { width: 3px; }
+  #detection-list::-webkit-scrollbar-thumb { background: var(--dim); }
+
+  .det-item {
+    display: flex;
+    justify-content: space-between;
+    padding: 2px 0;
+    border-bottom: 1px solid rgba(0,212,255,0.08);
+    animation: fadeIn 0.3s ease;
+  }
+
+  @keyframes fadeIn { from { opacity:0; transform: translateX(-8px); } to { opacity:1; } }
+
+  .det-label { color: var(--cyan); }
+  .det-conf  { color: var(--gold); }
+
+  /* Radar */
+  #radar-wrap {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+  }
+
+  #radar {
+    width: 120px; height: 120px;
+    position: relative;
+  }
+
+  .radar-ring {
+    position: absolute;
+    border-radius: 50%;
+    border: 1px solid rgba(0,212,255,0.25);
+    top: 50%; left: 50%;
+    transform: translate(-50%,-50%);
+  }
+
+  .radar-sweep {
+    position: absolute;
+    width: 50%; height: 50%;
+    top: 50%; left: 50%;
+    transform-origin: 0% 100%;
+    background: conic-gradient(from 0deg, transparent 85%, rgba(0,212,255,0.6));
+    animation: sweep 3s linear infinite;
+    border-radius: 0 100% 0 0;
+  }
+
+  @keyframes sweep { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+
+  .radar-dot {
+    position: absolute;
+    width: 5px; height: 5px;
+    background: var(--green);
+    border-radius: 50%;
+    box-shadow: 0 0 6px var(--green);
+    top: 50%; left: 50%;
+    transform: translate(-50%,-50%);
+  }
+
+  /* Bar meters */
+  .meter-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.7rem;
+    margin: 4px 0;
+  }
+
+  .meter-label { width: 60px; color: rgba(0,212,255,0.7); font-size: 0.65rem; }
+
+  .meter-track {
+    flex: 1;
+    height: 4px;
+    background: rgba(0,212,255,0.1);
+    border-radius: 2px;
+    overflow: hidden;
+  }
+
+  .meter-fill {
+    height: 100%;
+    border-radius: 2px;
+    background: linear-gradient(90deg, var(--blue), var(--cyan));
+    transition: width 0.5s ease;
+  }
+
+  .meter-val { width: 36px; text-align: right; color: var(--gold); font-size: 0.65rem; }
+
+  /* Stat grid */
+  .stat-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
+  }
+
+  .stat-box {
+    background: rgba(0,212,255,0.05);
+    border: 1px solid rgba(0,212,255,0.15);
+    border-radius: 3px;
+    padding: 6px 8px;
+    text-align: center;
+  }
+
+  .stat-val  { font-family: 'Orbitron', sans-serif; font-size: 1rem; color: var(--cyan); }
+  .stat-lbl  { font-size: 0.55rem; color: rgba(0,212,255,0.5); letter-spacing: 2px; margin-top: 2px; }
+
+  /* Connection indicator */
+  #conn-status {
+    font-size: 0.65rem;
+    color: var(--red);
+    letter-spacing: 2px;
+    transition: color 0.3s;
+  }
+  #conn-status.ok { color: var(--green); }
+
+  /* Hex grid decoration */
+  .hex-deco {
+    position: fixed;
+    opacity: 0.03;
+    font-size: 0.6rem;
+    color: var(--cyan);
+    line-height: 1.4;
+    pointer-events: none;
+    user-select: none;
+    white-space: pre;
+    z-index: -1;
+  }
+
+  /* Scrollbar hide */
+  .no-scroll { overflow: hidden; }
+</style>
+</head>
+<body>
+
+<!-- Hex background decoration -->
+<div class="hex-deco" style="top:80px;left:20px">
+⬡⬡⬡⬡⬡⬡⬡⬡⬡⬡⬡⬡⬡⬡⬡⬡⬡⬡⬡⬡
+⬡⬡⬡⬡⬡⬡⬡⬡⬡⬡⬡⬡⬡⬡⬡⬡⬡⬡⬡⬡
+⬡⬡⬡⬡⬡⬡⬡⬡⬡⬡⬡⬡⬡⬡⬡⬡⬡⬡⬡⬡
+⬡⬡⬡⬡⬡⬡⬡⬡⬡⬡⬡⬡⬡⬡⬡⬡⬡⬡⬡⬡
+⬡⬡⬡⬡⬡⬡⬡⬡⬡⬡⬡⬡⬡⬡⬡⬡⬡⬡⬡⬡
+⬡⬡⬡⬡⬡⬡⬡⬡⬡⬡⬡⬡⬡⬡⬡⬡⬡⬡⬡⬡
+</div>
+
+<!-- HEADER -->
+<header>
+  <div class="logo">E<span>U</span>NICE</div>
+  <div style="display:flex;align-items:center;gap:16px;font-size:0.75rem;">
+    <span id="conn-status">● CONNECTING</span>
+    <span id="date-display"></span>
+  </div>
+  <div id="clock">00:00:00</div>
+</header>
+
+<!-- LEFT PANEL -->
+<div id="panel-left">
+  <div class="widget-title">Visual Feed</div>
+
+  <!-- Radar -->
+  <div id="radar-wrap">
+    <div id="radar">
+      <div class="radar-ring" style="width:30px;height:30px"></div>
+      <div class="radar-ring" style="width:60px;height:60px"></div>
+      <div class="radar-ring" style="width:90px;height:90px"></div>
+      <div class="radar-ring" style="width:120px;height:120px"></div>
+      <div class="radar-sweep"></div>
+      <div class="radar-dot"></div>
+    </div>
+  </div>
+
+  <div class="widget-title">System</div>
+  <div class="stat-grid">
+    <div class="stat-box">
+      <div class="stat-val" id="fps-stat">--</div>
+      <div class="stat-lbl">FPS</div>
+    </div>
+    <div class="stat-box">
+      <div class="stat-val" id="det-count">0</div>
+      <div class="stat-lbl">OBJECTS</div>
+    </div>
+    <div class="stat-box">
+      <div class="stat-val" id="uptime-stat">00:00</div>
+      <div class="stat-lbl">UPTIME</div>
+    </div>
+    <div class="stat-box">
+      <div class="stat-val" id="frame-stat">0</div>
+      <div class="stat-lbl">FRAMES</div>
+    </div>
+  </div>
+
+  <div class="widget-title">Signal</div>
+  <div class="meter-row">
+    <span class="meter-label">VIDEO</span>
+    <div class="meter-track"><div class="meter-fill" id="m-video" style="width:0%"></div></div>
+    <span class="meter-val" id="mv-val">--</span>
+  </div>
+  <div class="meter-row">
+    <span class="meter-label">AI LOAD</span>
+    <div class="meter-track"><div class="meter-fill" id="m-ai" style="width:60%;background:linear-gradient(90deg,#0066ff,#00d4ff)"></div></div>
+    <span class="meter-val" id="mai-val">60%</span>
+  </div>
+  <div class="meter-row">
+    <span class="meter-label">BRIDGE</span>
+    <div class="meter-track"><div class="meter-fill" id="m-bridge" style="width:85%"></div></div>
+    <span class="meter-val">85%</span>
+  </div>
+</div>
+
+<!-- CAMERA CENTER -->
+<div id="camera-wrap">
+  <img id="cam" src="" alt=""/>
+  <canvas id="detection-canvas"></canvas>
+  <div id="scanline"></div>
+  <div class="corner tl"></div>
+  <div class="corner tr"></div>
+  <div class="corner bl"></div>
+  <div class="corner br"></div>
+  <div id="fps-badge">LIVE ● <span id="fps-live">--</span> FPS</div>
+</div>
+
+<!-- RIGHT PANEL -->
+<div id="panel-right">
+  <div class="widget-title">Detections</div>
+  <div id="detection-list"><div style="color:rgba(0,212,255,0.3);font-size:0.7rem">Awaiting feed...</div></div>
+
+  <div class="widget-title">Neural Activity</div>
+  <div id="neural-bars" style="display:flex;gap:3px;align-items:flex-end;height:60px;padding:4px 0">
+    <!-- animated bars added by JS -->
+  </div>
+
+  <div class="widget-title">Log</div>
+  <div id="log-feed" style="font-size:0.65rem;color:rgba(0,212,255,0.6);line-height:1.7;flex:1;overflow-y:auto">
+  </div>
+</div>
+
+<!-- BOTTOM — EUNICE RESPONSE -->
+<div id="panel-bottom">
+  <div class="eunice-icon">EUNICE</div>
+  <div id="eunice-text"><span id="cursor-area">System online. Ready.<span id="eunice-cursor"></span></span></div>
+</div>
+
+<script>
+const WS_URL = `ws://${location.hostname}:8765`;
+let ws, frameCount = 0, startTime = Date.now();
+
+// ── Clock ──────────────────────────────────────────────────────────────────────
+function updateClock() {
+  const now = new Date();
+  document.getElementById('clock').textContent =
+    now.toTimeString().slice(0, 8);
+  document.getElementById('date-display').textContent =
+    now.toLocaleDateString('en-IN', {weekday:'short',day:'2-digit',month:'short',year:'numeric'}).toUpperCase();
+  setTimeout(updateClock, 1000);
+}
+updateClock();
+
+// ── Uptime ─────────────────────────────────────────────────────────────────────
+setInterval(() => {
+  const s = Math.floor((Date.now() - startTime) / 1000);
+  const m = Math.floor(s / 60).toString().padStart(2, '0');
+  const sec = (s % 60).toString().padStart(2, '0');
+  document.getElementById('uptime-stat').textContent = `${m}:${sec}`;
+}, 1000);
+
+// ── Neural bars animation ──────────────────────────────────────────────────────
+const neuralWrap = document.getElementById('neural-bars');
+const BAR_COUNT = 24;
+const bars = [];
+for (let i = 0; i < BAR_COUNT; i++) {
+  const bar = document.createElement('div');
+  bar.style.cssText = `flex:1;border-radius:2px 2px 0 0;background:linear-gradient(0deg,#0066ff,#00d4ff);min-height:4px;transition:height 0.15s ease`;
+  neuralWrap.appendChild(bar);
+  bars.push(bar);
+}
+function animateBars() {
+  bars.forEach((b, i) => {
+    const h = 8 + Math.random() * 52;
+    b.style.height = h + 'px';
+    b.style.opacity = 0.4 + Math.random() * 0.6;
+  });
+}
+setInterval(animateBars, 120);
+
+// ── Log feed ───────────────────────────────────────────────────────────────────
+const logEl = document.getElementById('log-feed');
+function addLog(msg) {
+  const t = new Date().toTimeString().slice(0,8);
+  const line = document.createElement('div');
+  line.textContent = `[${t}] ${msg}`;
+  logEl.appendChild(line);
+  // Keep last 30 lines
+  while (logEl.children.length > 30) logEl.removeChild(logEl.firstChild);
+  logEl.scrollTop = logEl.scrollHeight;
+}
+addLog('HUD initialised');
+addLog('Connecting to backend...');
+
+// ── Eunice text typewriter ─────────────────────────────────────────────────────
+let typeTimer = null;
+function typeText(text) {
+  const el = document.getElementById('eunice-text');
+  if (typeTimer) clearTimeout(typeTimer);
+  el.innerHTML = '<span id="eunice-cursor"></span>';
+  let i = 0;
+  function tick() {
+    if (i < text.length) {
+      const span = el.querySelector('#eunice-cursor');
+      span.insertAdjacentText('beforebegin', text[i++]);
+      typeTimer = setTimeout(tick, 22);
+    }
+  }
+  tick();
+}
+
+// ── Detection rendering ────────────────────────────────────────────────────────
+const canvas = document.getElementById('detection-canvas');
+const ctx    = canvas.getContext('2d');
+
+function drawDetections(dets) {
+  const w = canvas.offsetWidth, h = canvas.offsetHeight;
+  canvas.width = w; canvas.height = h;
+  ctx.clearRect(0, 0, w, h);
+
+  const detList = document.getElementById('detection-list');
+  if (dets.length === 0) {
+    detList.innerHTML = '<div style="color:rgba(0,212,255,0.3);font-size:0.7rem">No objects detected</div>';
+    return;
+  }
+
+  detList.innerHTML = '';
+  dets.forEach(det => {
+    const [x1r, y1r, x2r, y2r] = det.box;
+    const x1 = x1r*w, y1 = y1r*h, x2 = x2r*w, y2 = y2r*h;
+    const bw  = x2 - x1, bh = y2 - y1;
+    const col = det.label === 'person' ? '#ff3333' : '#00d4ff';
+
+    ctx.strokeStyle = col;
+    ctx.lineWidth   = 1.5;
+    ctx.shadowColor = col;
+    ctx.shadowBlur  = 8;
+    ctx.strokeRect(x1, y1, bw, bh);
+    ctx.shadowBlur = 0;
+
+    // Corner brackets only
+    const cs = 12;
+    ctx.lineWidth = 2.5;
+    [[x1,y1,1,1],[x2,y1,-1,1],[x1,y2,1,-1],[x2,y2,-1,-1]].forEach(([cx,cy,dx,dy]) => {
+      ctx.beginPath();
+      ctx.moveTo(cx+dx*cs, cy);
+      ctx.lineTo(cx, cy);
+      ctx.lineTo(cx, cy+dy*cs);
+      ctx.stroke();
+    });
+
+    // Label
+    ctx.fillStyle = col;
+    ctx.font = '11px Share Tech Mono, monospace';
+    ctx.fillText(`${det.label} ${Math.round(det.conf*100)}%`, x1+4, y1-5);
+
+    // List item
+    const item = document.createElement('div');
+    item.className = 'det-item';
+    item.innerHTML = `<span class="det-label">${det.label}</span><span class="det-conf">${Math.round(det.conf*100)}%</span>`;
+    detList.appendChild(item);
+  });
+}
+
+// ── WebSocket ──────────────────────────────────────────────────────────────────
+function connect() {
+  ws = new WebSocket(WS_URL);
+  const statusEl = document.getElementById('conn-status');
+
+  ws.onopen = () => {
+    statusEl.textContent = '● CONNECTED';
+    statusEl.className = 'ok';
+    addLog('WebSocket connected');
+  };
+
+  ws.onmessage = (e) => {
+    let data;
+    try { data = JSON.parse(e.data); } catch { return; }
+    if (data.type !== 'frame') return;
+
+    // Camera frame
+    const img = document.getElementById('cam');
+    img.src = 'data:image/jpeg;base64,' + data.frame;
+    frameCount++;
+
+    // FPS
+    const fps = data.fps || 0;
+    document.getElementById('fps-live').textContent  = fps;
+    document.getElementById('fps-stat').textContent  = fps;
+    document.getElementById('frame-stat').textContent = frameCount > 9999 ? '9999+' : frameCount;
+
+    const fpsW = Math.min(fps / 60 * 100, 100);
+    document.getElementById('m-video').style.width = fpsW + '%';
+    document.getElementById('mv-val').textContent  = fps + ' fps';
+
+    // Detections
+    const dets = data.detections || [];
+    document.getElementById('det-count').textContent = dets.length;
+    drawDetections(dets);
+
+    // Eunice message
+    if (data.eunice && data.eunice.trim()) {
+      typeText(data.eunice);
+      addLog('EUNICE: ' + data.eunice.slice(0, 60));
+    }
+  };
+
+  ws.onclose = () => {
+    statusEl.textContent = '● DISCONNECTED';
+    statusEl.className   = '';
+    addLog('Connection lost. Retrying...');
+    setTimeout(connect, 2000);
+  };
+
+  ws.onerror = () => { ws.close(); };
+}
+
+connect();
+
+// ── AI load meter animation ────────────────────────────────────────────────────
+setInterval(() => {
+  const v = 45 + Math.random() * 40;
+  document.getElementById('m-ai').style.width  = v + '%';
+  document.getElementById('mai-val').textContent = Math.round(v) + '%';
+}, 2000);
+</script>
+</body>
+</html>
