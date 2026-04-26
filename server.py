@@ -122,8 +122,107 @@ def apply_fx(frame, mask, h, w):
     return frame
 
 import numpy as np
+import subprocess, platform
+
 if USE_HAND_FX:
     init_hand_detector()
+
+# ── GESTURE ENGINE ─────────────────────────────────────────────────────────────
+gesture_state = {
+    "volume":     50,
+    "brightness": 100,
+    "fx_intensity": 1.0,
+    "effect":     "chromatic",
+    "labels":     [],   # [{text, x, y}] drawn on frame
+}
+
+def dist(a, b):
+    return ((a.x-b.x)**2 + (a.y-b.y)**2)**0.5
+
+def fingers_up(lms):
+    tips  = [8, 12, 16, 20]
+    pips  = [6, 10, 14, 18]
+    count = sum(1 for t,p in zip(tips,pips) if lms[t].y < lms[p].y)
+    thumb = 1 if lms[4].x < lms[3].x else 0
+    return thumb + count
+
+def set_volume_mac(vol):
+    try:
+        vol = max(0, min(100, int(vol)))
+        subprocess.run(['osascript','-e',f'set volume output volume {vol}'],
+                       capture_output=True, timeout=1)
+    except Exception:
+        pass
+
+def process_gestures(all_lms, handedness_list, h, w):
+    global HAND_EFFECT
+    labels = []
+    effects = ["chromatic","mirror","glitch","trails","neon"]
+
+    for i, lms in enumerate(all_lms):
+        hand_label = "Right"
+        if handedness_list and i < len(handedness_list):
+            hand_label = handedness_list[i][0].category_name
+
+        wrist = lms[0]
+        wx, wy = int(wrist.x*w), int(wrist.y*h)
+        f_up  = fingers_up(lms)
+        pinch = dist(lms[4], lms[8])
+
+        if hand_label == "Right":
+            # Hand height → volume (hand near top = loud, near bottom = quiet)
+            vol = int((1.0 - wrist.y) * 100)
+            vol = max(0, min(100, vol))
+            gesture_state["volume"] = vol
+            set_volume_mac(vol)
+            labels.append({"text": f"Volume: {vol}%", "x": wx, "y": max(wy-30,20)})
+
+            # Pinch → cycle effects
+            if pinch < 0.05 and f_up <= 1:
+                idx = effects.index(HAND_EFFECT)
+                HAND_EFFECT = effects[(idx+1) % len(effects)]
+                labels.append({"text": f"FX: {HAND_EFFECT}", "x": wx, "y": max(wy-55,20)})
+
+        elif hand_label == "Left":
+            # Hand height → brightness
+            bri = int((1.0 - wrist.y) * 100)
+            bri = max(10, min(100, bri))
+            gesture_state["brightness"] = bri
+            labels.append({"text": f"Brightness: {bri}%", "x": wx, "y": max(wy-30,20)})
+
+            # Finger spread → effect intensity
+            spread = dist(lms[4], lms[20])
+            gesture_state["fx_intensity"] = round(min(spread * 6, 2.0), 1)
+            labels.append({"text": f"Intensity: {gesture_state['fx_intensity']}x", "x": wx, "y": max(wy-55,20)})
+
+        # Fist = 0 fingers = show fist label
+        if f_up == 0:
+            labels.append({"text": "FIST", "x": wx, "y": max(wy-80,20)})
+
+        gesture_state["labels"] = labels
+
+def draw_gesture_labels(frame, labels):
+    for lb in labels:
+        x, y = lb["x"], lb["y"]
+        text  = lb["text"]
+        (tw, th), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.55, 1)
+        cv2.rectangle(frame, (x-4, y-th-4), (x+tw+4, y+4), (0,0,0), -1)
+        cv2.putText(frame, text, (x,y), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255,215,0), 1, cv2.LINE_AA)
+
+def draw_particles(frame, all_lms, h, w, tick):
+    for lms in all_lms:
+        for tip_idx in [4,8,12,16,20]:
+            lm   = lms[tip_idx]
+            cx   = int(lm.x*w); cy = int(lm.y*h)
+            for i in range(6):
+                off_x = int(np.random.normal(0, 10+i*3))
+                off_y = int(np.random.normal(-5, 8+i*2))
+                r     = max(1, 5-i)
+                alpha = max(0, 0.7 - i*0.12)
+                col   = (0, int(180*alpha), int(255*alpha))
+                px, py = cx+off_x, cy+off_y
+                if 0<=px<w and 0<=py<h:
+                    cv2.circle(frame, (px,py), r, col, -1, cv2.LINE_AA)
 
 # ── YOLO INIT ──────────────────────────────────────────────────────────────────
 model  = None
@@ -194,25 +293,35 @@ def camera_thread():
             except Exception:
                 pass
 
-        # Hand FX
+        # Hand FX + Gestures
         if USE_HAND_FX and hand_detector:
             try:
                 import mediapipe as mp
                 fh2, fw2 = frame.shape[:2]
-                rgb2   = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                mp_img = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb2)
-                hres   = hand_detector.detect(mp_img)
-                all_lms = hres.hand_landmarks or []
+                frame    = cv2.flip(frame, 1)
+                rgb2     = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                mp_img   = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb2)
+                hres     = hand_detector.detect(mp_img)
+                all_lms  = hres.hand_landmarks or []
+                handedness = hres.handedness or []
                 combined = None
                 if all_lms:
                     combined = np.zeros((fh2,fw2),dtype=np.uint8)
                     for lms in all_lms:
                         combined = cv2.bitwise_or(combined, make_mask(lms,fh2,fw2))
+                    process_gestures(all_lms, handedness, fh2, fw2)
                 frame = apply_fx(frame, combined, fh2, fw2)
                 if all_lms:
+                    draw_particles(frame, all_lms, fh2, fw2, fc)
                     for lms in all_lms:
                         draw_hand(frame, lms, fh2, fw2)
-            except Exception as e:
+                    draw_gesture_labels(frame, gesture_state["labels"])
+                # Brightness overlay
+                bri = gesture_state["brightness"]
+                if bri < 100:
+                    overlay = np.zeros_like(frame)
+                    frame   = cv2.addWeighted(frame, bri/100, overlay, 1-bri/100, 0)
+            except Exception:
                 pass
 
         frame_small = cv2.resize(frame, (FRAME_W, FRAME_H))
@@ -280,7 +389,8 @@ async def broadcast_loop():
                 "fps":        frame_data["fps"],
                 "time":       datetime.datetime.now().strftime("%H:%M:%S"),
                 "date":       datetime.datetime.now().strftime("%A, %d %b %Y").upper(),
-                "eunice":     eunice_text if (time.time() - eunice_ts) < 10 else "",
+                "eunice":     eunice_text[:200] if (time.time() - eunice_ts) < 10 else "",
+            "gestures":   {"volume": gesture_state["volume"], "brightness": gesture_state["brightness"], "effect": HAND_EFFECT},
             }
 
         if payload["frame"] is None:
