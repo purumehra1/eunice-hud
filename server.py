@@ -17,9 +17,12 @@ import urllib.request
 import os
 
 # ── CONFIG ─────────────────────────────────────────────────────────────────────
-CAMERA_SOURCE  = 0                                    # 0 = built-in webcam
+CAMERA_SOURCE  = 0
 DROIDCAM_URL   = "http://192.168.29.167:4747/video"
-USE_DROIDCAM   = False        # True = use DroidCam IP instead of webcam
+USE_DROIDCAM   = False        # Set True + update IP to use phone camera
+USE_VOICE      = True         # Voice trigger — say "Eunice <question>"
+STOCK_TICKERS  = ["RELIANCE.NS","INFY.NS","HDFCBANK.NS","BTC-USD"]
+CITY           = "Mumbai"     # Weather city
 USE_YOLO       = True         # auto-detects GPU (MPS on Apple Silicon, CPU fallback)
 YOLO_MODEL     = "yolov8n.pt"
 FRAME_W        = 854
@@ -127,6 +130,106 @@ import subprocess, platform
 if USE_HAND_FX:
     init_hand_detector()
 
+# ── LIVE DATA ──────────────────────────────────────────────────────────────────
+live_data = {
+    "weather": {"temp": "--", "desc": "--", "city": CITY},
+    "stocks":  [],
+    "news":    [],
+}
+
+def fetch_weather():
+    try:
+        url  = f"https://wttr.in/{CITY.replace(' ','+')}?format=j1"
+        req  = urllib.request.Request(url, headers={"User-Agent":"curl/7.64"})
+        resp = urllib.request.urlopen(req, timeout=6)
+        d    = json.loads(resp.read())
+        cc   = d["current_condition"][0]
+        live_data["weather"] = {
+            "temp": cc["temp_C"] + "°C",
+            "desc": cc["weatherDesc"][0]["value"],
+            "city": CITY,
+        }
+    except Exception as e:
+        pass
+
+def fetch_stocks():
+    try:
+        import yfinance as yf
+        stocks = []
+        for ticker in STOCK_TICKERS:
+            try:
+                t    = yf.Ticker(ticker)
+                fi   = t.fast_info
+                price  = round(fi.last_price, 2)
+                prev   = fi.previous_close
+                change = round(((price - prev) / prev) * 100, 2) if prev else 0
+                name   = ticker.replace(".NS","").replace("-USD","")
+                stocks.append({"name": name, "price": price, "change": change})
+            except Exception:
+                pass
+        live_data["stocks"] = stocks
+    except Exception:
+        pass
+
+def fetch_news():
+    try:
+        from xml.etree import ElementTree as ET
+        url  = "https://feeds.bbci.co.uk/news/world/rss.xml"
+        req  = urllib.request.Request(url, headers={"User-Agent":"curl/7.64"})
+        resp = urllib.request.urlopen(req, timeout=6)
+        tree = ET.parse(resp)
+        items = tree.findall(".//item")[:6]
+        live_data["news"] = [it.find("title").text for it in items if it.find("title") is not None]
+    except Exception:
+        pass
+
+def data_thread():
+    while True:
+        fetch_weather()
+        fetch_stocks()
+        fetch_news()
+        time.sleep(60)
+
+threading.Thread(target=data_thread, daemon=True, name="LiveData").start()
+
+# ── VOICE TRIGGER ──────────────────────────────────────────────────────────────
+voice_query_queue = queue.Queue()
+
+def voice_thread():
+    if not USE_VOICE:
+        return
+    try:
+        import speech_recognition as sr
+    except ImportError:
+        print("[Voice] pip install SpeechRecognition pyaudio")
+        return
+
+    r   = sr.Recognizer()
+    r.energy_threshold = 300
+    r.dynamic_energy_threshold = True
+    print("[Voice] Listening for 'Eunice'...")
+
+    while True:
+        try:
+            with sr.Microphone() as src:
+                r.adjust_for_ambient_noise(src, duration=0.5)
+                audio = r.listen(src, timeout=5, phrase_time_limit=8)
+            text = r.recognize_google(audio).lower()
+            print(f"[Voice] Heard: {text}")
+            if "eunice" in text:
+                query = text.replace("eunice","").strip(" ,.")
+                if query:
+                    print(f"[Voice] Query: {query}")
+                    voice_query_queue.put(query)
+        except sr.WaitTimeoutError:
+            pass
+        except sr.UnknownValueError:
+            pass
+        except Exception as e:
+            time.sleep(1)
+
+threading.Thread(target=voice_thread, daemon=True, name="Voice").start()
+
 # ── GESTURE ENGINE ─────────────────────────────────────────────────────────────
 gesture_state = {
     "volume":     50,
@@ -170,30 +273,28 @@ def process_gestures(all_lms, handedness_list, h, w):
         pinch = dist(lms[4], lms[8])
 
         if hand_label == "Right":
-            # Hand height → volume (hand near top = loud, near bottom = quiet)
-            vol = int((1.0 - wrist.y) * 100)
+            # Spread (thumb-to-pinky) → volume — stable and intuitive
+            spread_vol = dist(lms[4], lms[20])
+            vol = int(spread_vol * 300)
             vol = max(0, min(100, vol))
             gesture_state["volume"] = vol
             set_volume_mac(vol)
             labels.append({"text": f"Volume: {vol}%", "x": wx, "y": max(wy-30,20)})
 
-            # Pinch → cycle effects
+            # Pinch (thumb-index close + fist) → cycle effects
             if pinch < 0.05 and f_up <= 1:
                 idx = effects.index(HAND_EFFECT)
                 HAND_EFFECT = effects[(idx+1) % len(effects)]
                 labels.append({"text": f"FX: {HAND_EFFECT}", "x": wx, "y": max(wy-55,20)})
 
         elif hand_label == "Left":
-            # Hand height → brightness
-            bri = int((1.0 - wrist.y) * 100)
+            # Spread (thumb-to-pinky distance) → brightness
+            # Far apart = bright, close together = dim — stable, no shaking
+            spread = dist(lms[4], lms[20])
+            bri = int(spread * 300)   # ~0.33 spread = 100%
             bri = max(10, min(100, bri))
             gesture_state["brightness"] = bri
             labels.append({"text": f"Brightness: {bri}%", "x": wx, "y": max(wy-30,20)})
-
-            # Finger spread → effect intensity
-            spread = dist(lms[4], lms[20])
-            gesture_state["fx_intensity"] = round(min(spread * 6, 2.0), 1)
-            labels.append({"text": f"Intensity: {gesture_state['fx_intensity']}x", "x": wx, "y": max(wy-55,20)})
 
         # Fist = 0 fingers = show fist label
         if f_up == 0:
@@ -381,6 +482,21 @@ async def broadcast_loop():
             except queue.Empty:
                 break
 
+        # Voice queries → push to VPS as Eunice input
+        while not voice_query_queue.empty():
+            try:
+                vq = voice_query_queue.get_nowait()
+                # Push to eunice-feed as a voice query marker
+                body = json.dumps({"message": f"🎙 {vq}"}).encode()
+                import http.client
+                conn = http.client.HTTPConnection("127.0.0.1", 9204, timeout=2)
+                conn.request("POST", "/push", body, {"Content-Type":"application/json"})
+                conn.getresponse()
+                eunice_text = f"Processing: {vq}..."
+                eunice_ts   = time.time()
+            except Exception:
+                pass
+
         with frame_lock:
             payload = {
                 "type":       "frame",
@@ -391,6 +507,9 @@ async def broadcast_loop():
                 "date":       datetime.datetime.now().strftime("%A, %d %b %Y").upper(),
                 "eunice":     eunice_text[:200] if (time.time() - eunice_ts) < 10 else "",
             "gestures":   {"volume": gesture_state["volume"], "brightness": gesture_state["brightness"], "effect": HAND_EFFECT},
+            "weather":    live_data["weather"],
+            "stocks":     live_data["stocks"],
+            "news":       live_data["news"],
             }
 
         if payload["frame"] is None:

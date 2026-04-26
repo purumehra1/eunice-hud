@@ -370,14 +370,24 @@
 
 <!-- RIGHT -->
 <div class="panel">
+  <div class="section-title">Weather</div>
+  <div id="weather-box" style="font-size:0.75rem;line-height:1.8">
+    <div style="font-family:'Orbitron',sans-serif;font-size:1.1rem;color:var(--gold)" id="w-temp">--°C</div>
+    <div style="color:var(--dim)" id="w-desc">Loading...</div>
+    <div style="color:var(--dim);font-size:0.6rem" id="w-city">--</div>
+  </div>
+
+  <div class="section-title">Markets</div>
+  <div id="stocks-list" style="font-size:0.7rem;line-height:2"></div>
+
   <div class="section-title">Detections</div>
-  <div id="detection-list"><div style="color:rgba(255,200,0,0.25);font-size:0.7rem">Awaiting feed...</div></div>
+  <div id="detection-list" style="font-size:0.7rem;line-height:1.8;max-height:80px;overflow-y:auto"><div style="color:rgba(255,200,0,0.25)">Awaiting feed...</div></div>
 
   <div class="section-title">Neural Activity</div>
   <div id="neural-bars"></div>
 
-  <div class="section-title">Log</div>
-  <div id="log-feed"></div>
+  <div class="section-title">News</div>
+  <div id="news-ticker" style="font-size:0.62rem;color:var(--dim);line-height:1.7;flex:1;overflow-y:auto"></div>
 </div>
 
 <!-- BOTTOM -->
@@ -536,6 +546,34 @@ function connect(){
       document.getElementById('m-bri').style.width=g.brightness+'%';
       document.getElementById('bri-val').textContent=g.brightness+'%';
       document.getElementById('fx-label').textContent=g.effect.toUpperCase();
+    }
+
+    if(data.weather){
+      const w=data.weather;
+      document.getElementById('w-temp').textContent=w.temp;
+      document.getElementById('w-desc').textContent=w.desc;
+      document.getElementById('w-city').textContent=w.city.toUpperCase();
+    }
+
+    if(data.stocks&&data.stocks.length){
+      const sl=document.getElementById('stocks-list');
+      sl.innerHTML=data.stocks.map(s=>{
+        const col=s.change>=0?'#44ff88':'#ff4444';
+        const arrow=s.change>=0?'▲':'▼';
+        return `<div style="display:flex;justify-content:space-between;border-bottom:1px solid rgba(255,215,0,0.08)">
+          <span style="color:var(--amber)">${s.name}</span>
+          <span style="color:${col}">${arrow} ${Math.abs(s.change)}%</span>
+        </div>`;
+      }).join('');
+    }
+
+    if(data.news&&data.news.length){
+      const nl=document.getElementById('news-ticker');
+      nl.innerHTML=data.news.map((n,i)=>
+        `<div style="border-bottom:1px solid rgba(255,215,0,0.06);padding:1px 0">
+          <span style="color:var(--gold3);margin-right:4px">${i+1}.</span>${n}
+        </div>`
+      ).join('');
     }
   };
 
